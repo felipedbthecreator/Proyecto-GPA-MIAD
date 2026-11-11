@@ -1,0 +1,107 @@
+"""Socrata client with bounded and complete paginated queries."""
+
+from __future__ import annotations
+
+import os
+from typing import Any, Optional
+
+import pandas as pd
+import requests
+
+DATASET_ID = os.getenv("SOCRATA_DATASET_ID", "7y2j-43cv")
+DOMAIN = os.getenv("SOCRATA_DOMAIN", "www.datos.gov.co")
+RESOURCE_URL = f"https://{DOMAIN}/resource/{DATASET_ID}.json"
+METADATA_URL = f"https://{DOMAIN}/api/views/{DATASET_ID}"
+
+
+class SocrataClient:
+    """Fetch metadata or bounded data from a Socrata dataset."""
+
+    def __init__(self, timeout: int = 60) -> None:
+        self.timeout = timeout
+        self.session = requests.Session()
+        self.session.headers.update({"Accept": "application/json"})
+
+    def metadata(self) -> dict[str, Any]:
+        response = self.session.get(METADATA_URL, timeout=self.timeout)
+        response.raise_for_status()
+        return response.json()
+
+    def count(self, *, where: Optional[str] = None) -> int:
+        """Return the number of rows matching a SoQL predicate."""
+        params: dict[str, Any] = {"$select": "count(*) as registros"}
+        if where:
+            params["$where"] = where
+        response = self.session.get(RESOURCE_URL, params=params, timeout=self.timeout)
+        response.raise_for_status()
+        result = response.json()
+        if not result or "registros" not in result[0]:
+            raise ValueError("Socrata returned no count for the requested predicate")
+        return int(result[0]["registros"])
+
+    def fetch(
+        self,
+        *,
+        limit: int = 5_000,
+        page_size: int = 1_000,
+        where: Optional[str] = None,
+        select: str = "*",
+        order: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """Fetch at most ``limit`` rows using Socrata's offset pagination."""
+        if limit < 1 or page_size < 1:
+            raise ValueError("limit and page_size must be positive")
+        rows: list[dict[str, Any]] = []
+        for offset in range(0, limit, page_size):
+            params: dict[str, Any] = {
+                "$select": select,
+                "$limit": min(page_size, limit - offset),
+                "$offset": offset,
+            }
+            if where:
+                params["$where"] = where
+            if order:
+                params["$order"] = order
+            response = self.session.get(RESOURCE_URL, params=params, timeout=self.timeout)
+            response.raise_for_status()
+            page = response.json()
+            if not page:
+                break
+            rows.extend(page)
+            if len(page) < params["$limit"]:
+                break
+        return pd.DataFrame(rows)
+
+    def fetch_all(
+        self,
+        *,
+        where: Optional[str] = None,
+        select: str = "*",
+        page_size: int = 5_000,
+        expected_rows: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """Fetch all matching rows, stopping only at the API result boundary."""
+        if page_size < 1:
+            raise ValueError("page_size must be positive")
+        total = expected_rows if expected_rows is not None else self.count(where=where)
+        if total < 0:
+            raise ValueError("expected_rows must not be negative")
+        rows: list[dict[str, Any]] = []
+        for offset in range(0, total, page_size):
+            params: dict[str, Any] = {
+                "$select": select,
+                "$limit": page_size,
+                "$offset": offset,
+            }
+            if where:
+                params["$where"] = where
+            response = self.session.get(RESOURCE_URL, params=params, timeout=self.timeout)
+            response.raise_for_status()
+            page = response.json()
+            if not page:
+                break
+            rows.extend(page)
+            print(f"Descargadas {len(rows):,}/{total:,} filas")
+            if len(page) < page_size:
+                break
+        return pd.DataFrame(rows)
