@@ -6,18 +6,14 @@ publicado en datos.gov.co mediante Socrata (dataset `7y2j-43cv`).
 
 ## Alcance documentado (Entregas 2 y 3)
 
-El MVP se concentra en **compraventas** de **Caldas, Risaralda y Quindío**
+En esta primera versión se concentra en **compraventas** de **Caldas, Risaralda y Quindío**
 entre **2015 y 2023**, como línea base del mercado previo al evento definido
 en las entregas. El acto jurídico se filtra con `COD_NATUJUR = 125`
 (`COMPRAVENTA`). La transferencia posterior a Medellín, Bogotá, Cali y
 Barranquilla queda fuera de esta primera extracción y está condicionada a la
 calidad y cobertura.
 
-- Consulta de metadatos y datos mediante la API Socrata.
-- Descarga acotada y paginada únicamente dentro del alcance documentado.
-- La muestra acotada es una muestra de extracción de la API, no una muestra
-  aleatoria ni una estimación nacional; para análisis representativos se debe
-  procesar el universo del alcance por lotes y conservar sus resultados.
+- Consulta de metadatos y datos mediante la API Socrata según los parametros definidos en nuestras entregas anteriores.
 - Perfilado de tipos, faltantes, duplicados, valores inválidos y valores simbólicos.
 - Normalización de fechas, campos numéricos, texto y códigos territoriales.
 - Análisis preliminar de variables con estadísticas descriptivas, histogramas y
@@ -54,7 +50,7 @@ python -m src.igac_inmobiliario.pipeline --full --page-size 5000
 
 El modo completo cuenta primero el universo y descarga todas las compraventas
 del alcance (aproximadamente 457.558 filas) por páginas. El archivo completo
-se guarda en `data/processed/compraventas_eje_cafetero_completo_limpio.csv`.
+se guarda en `repositorio/data/processed/compraventas_eje_cafetero_completo_limpio.csv`.
 Durante la exploración rápida se puede usar:
 
 ```bash
