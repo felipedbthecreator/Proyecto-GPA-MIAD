@@ -13,7 +13,7 @@ TEXT_COLUMNS = ("pk","matricula","departamento","municipio","tipo_predio_zona","
 def extraer_fecha_escritura(documento: pd.Series) -> pd.Series:
     """Extrae la fecha de la escritura del texto del documento justificativo.
     """
-    partes = documento.astype("string").str.extract(r"\bDEL?\s+(\d{1,2})/(\d{1,2})/(\d{2,4})\b")
+    partes = documento.astype("string").str.extract(r"\bDEL?\s+(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b")
     anio = pd.to_numeric(partes[2], errors="coerce")
     anio = anio.where(anio >= 100, anio + 2000)
     anio = anio.where(anio <= 2030, anio - 100)
@@ -56,6 +56,8 @@ def clean_transactions(frame: pd.DataFrame) -> pd.DataFrame:
         data["fecha_escritura"] = extraer_fecha_escritura(data["documento_justificativo"])
         brecha = data["year_radica"] - data["fecha_escritura"].dt.year
         data["radicacion_antes_de_escritura"] = brecha.lt(0).fillna(False).astype(bool)
+        data["rezago_escritura_anios"] = brecha.astype("Int64")
+        data["escritura_rezagada"] = brecha.ge(2).fillna(False).astype(bool)
         if {"matricula", "num_anotacion"}.issubset(data.columns):
             # La misma anotación puede aparecer en varios años. Se conserva la copia
             # coherente con la escritura (año >= año de la escritura, lo más cercano);
