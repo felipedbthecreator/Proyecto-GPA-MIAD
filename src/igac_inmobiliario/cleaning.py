@@ -35,7 +35,7 @@ def clean_transactions(frame: pd.DataFrame) -> pd.DataFrame:
             pd.to_numeric(data["divipola"], errors="coerce")
             .astype("Int64")
             .astype("string")
-            .str.zfill(4)
+            .str.zfill(5)
         )
     for column in DATE_COLUMNS:
         if column in data:
