@@ -7,6 +7,8 @@ from typing import Any, Optional
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 DATASET_ID = os.getenv("SOCRATA_DATASET_ID", "7y2j-43cv")
 DOMAIN = os.getenv("SOCRATA_DOMAIN", "www.datos.gov.co")
@@ -20,10 +22,12 @@ STABLE_ORDER = ":id"
 class SocrataClient:
     """Fetch metadata or bounded data from a Socrata dataset."""
 
-    def __init__(self, timeout: int = 60) -> None:
+    def __init__(self, timeout: int = 120) -> None:
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({"Accept": "application/json"})
+        reintentos = Retry(total=5,backoff_factor=2,status_forcelist=(429, 500, 502, 503, 504),allowed_methods=("GET",),)
+        self.session.mount("https://", HTTPAdapter(max_retries=reintentos))
 
     def metadata(self) -> dict[str, Any]:
         response = self.session.get(METADATA_URL, timeout=self.timeout)

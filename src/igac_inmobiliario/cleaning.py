@@ -7,21 +7,8 @@ from typing import Any
 import pandas as pd
 
 DATE_COLUMNS = ("fecha_radica_texto", "fecha_apertura_texto")
-NUMERIC_COLUMNS = (
-    "year_radica",
-    "orip",
-    "num_anotacion",
-    "dinamica_2024",
-    "cod_natujur",
-    "count_a",
-    "count_de",
-    "predios_nuevos",
-    "tiene_valor",
-    "tiene_mas_de_un_valor",
-    "valor",
-)
-TEXT_COLUMNS = ("pk", "matricula", "departamento", "municipio", "tipo_predio_zona")
-
+NUMERIC_COLUMNS = ("year_radica","orip","num_anotacion","dinamica_2024","cod_natujur","count_a","count_de","predios_nuevos","tiene_valor","tiene_mas_de_un_valor","valor",)
+TEXT_COLUMNS = ("pk","matricula","departamento","municipio","tipo_predio_zona","documento_justificativo",)
 
 def clean_transactions(frame: pd.DataFrame) -> pd.DataFrame:
     """Return a typed copy without silently imputing invalid values."""
@@ -50,13 +37,16 @@ def clean_transactions(frame: pd.DataFrame) -> pd.DataFrame:
         data["valor_valido"] = data["valor"].gt(0) & data["tiene_valor"].eq(1)
         data["valor_simbolico_o_invalido"] = data["valor"].le(0) | data["valor"].isna()
     if "pk" in data:
-        data["registro_duplicado"] = data["pk"].duplicated(keep=False)
+        data["registro_duplicado"] = data["pk"].duplicated(keep="first")
+    escritura_cols = ["matricula", "documento_justificativo", "valor"]
+    if set(escritura_cols).issubset(data.columns):
+        data["escritura_duplicada"] = data.duplicated(escritura_cols, keep="first")
     if "matricula" in data:
         data["matricula_valida"] = data["matricula"].notna() & data["matricula"].ne("")
     if {"valor_valido", "registro_duplicado", "matricula_valida"}.issubset(data.columns):
-        data["incluido_universo_modelado"] = (
-            data["valor_valido"] & ~data["registro_duplicado"] & data["matricula_valida"]
-        )
+        data["incluido_universo_modelado"] = (data["valor_valido"] & ~data["registro_duplicado"] & data["matricula_valida"])
+        if "escritura_duplicada" in data:
+            data["incluido_universo_modelado"] &= ~data["escritura_duplicada"]
     return data
 
 
