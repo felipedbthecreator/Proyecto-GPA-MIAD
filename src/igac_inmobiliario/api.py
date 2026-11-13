@@ -12,6 +12,9 @@ DATASET_ID = os.getenv("SOCRATA_DATASET_ID", "7y2j-43cv")
 DOMAIN = os.getenv("SOCRATA_DOMAIN", "www.datos.gov.co")
 RESOURCE_URL = f"https://{DOMAIN}/resource/{DATASET_ID}.json"
 METADATA_URL = f"https://{DOMAIN}/api/views/{DATASET_ID}"
+# Socrata no garantiza el orden de las filas sin $order; paginar sin ordenar
+# puede repetir o saltar registros. ":id" es el id interno de fila (único y estable).
+STABLE_ORDER = ":id"
 
 
 class SocrataClient:
@@ -60,8 +63,7 @@ class SocrataClient:
             }
             if where:
                 params["$where"] = where
-            if order:
-                params["$order"] = order
+            params["$order"] = order or STABLE_ORDER
             response = self.session.get(RESOURCE_URL, params=params, timeout=self.timeout)
             response.raise_for_status()
             page = response.json()
@@ -92,6 +94,7 @@ class SocrataClient:
                 "$select": select,
                 "$limit": page_size,
                 "$offset": offset,
+                "$order": STABLE_ORDER,
             }
             if where:
                 params["$where"] = where
@@ -104,4 +107,7 @@ class SocrataClient:
             print(f"Descargadas {len(rows):,}/{total:,} filas")
             if len(page) < page_size:
                 break
+
+        if len(rows) != total:
+            print(f"ADVERTENCIA: se descargaron {len(rows):,} filas y se esperaban {total:,}.")
         return pd.DataFrame(rows)
