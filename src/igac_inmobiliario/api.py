@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Optional
 
 import pandas as pd
@@ -18,16 +19,43 @@ METADATA_URL = f"https://{DOMAIN}/api/views/{DATASET_ID}"
 # puede repetir o saltar registros. ":id" es el id interno de fila (único y estable).
 STABLE_ORDER = ":id"
 
+# Errores de red ante los que vale la pena volver a pedir la misma página.
+ERRORES_RED = (
+    requests.exceptions.ChunkedEncodingError,  # conexión cortada a mitad de la respuesta
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+)
+
 
 class SocrataClient:
     """Fetch metadata or bounded data from a Socrata dataset."""
 
-    def __init__(self, timeout: int = 120) -> None:
+    def __init__(self, timeout: int = 120, intentos_pagina: int = 6) -> None:
         self.timeout = timeout
+        self.intentos_pagina = intentos_pagina
         self.session = requests.Session()
         self.session.headers.update({"Accept": "application/json"})
         reintentos = Retry(total=5,backoff_factor=2,status_forcelist=(429, 500, 502, 503, 504),allowed_methods=("GET",),)
         self.session.mount("https://", HTTPAdapter(max_retries=reintentos))
+
+    def _get_page(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Pide una página y la reintenta si la conexión se cae, sin perder lo ya descargado."""
+        for intento in range(1, self.intentos_pagina + 1):
+            try:
+                response = self.session.get(RESOURCE_URL, params=params, timeout=self.timeout)
+                response.raise_for_status()
+                return response.json()
+            except ERRORES_RED as error:
+                if intento == self.intentos_pagina:
+                    raise
+                espera = 5 * 2 ** (intento - 1)  # 5, 10, 20, 40, 80 segundos
+                print(
+                    f"  Falla de conexión en offset {params.get('$offset', 0):,} "
+                    f"({type(error).__name__}). Reintento {intento}/{self.intentos_pagina - 1} "
+                    f"en {espera} s..."
+                )
+                time.sleep(espera)
+        return []
 
     def metadata(self) -> dict[str, Any]:
         response = self.session.get(METADATA_URL, timeout=self.timeout)
@@ -68,9 +96,7 @@ class SocrataClient:
             if where:
                 params["$where"] = where
             params["$order"] = order or STABLE_ORDER
-            response = self.session.get(RESOURCE_URL, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            page = response.json()
+            page = self._get_page(params)
             if not page:
                 break
             rows.extend(page)
@@ -102,9 +128,7 @@ class SocrataClient:
             }
             if where:
                 params["$where"] = where
-            response = self.session.get(RESOURCE_URL, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            page = response.json()
+            page = self._get_page(params)
             if not page:
                 break
             rows.extend(page)
