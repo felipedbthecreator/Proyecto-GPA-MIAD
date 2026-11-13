@@ -3,24 +3,59 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Optional
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 DATASET_ID = os.getenv("SOCRATA_DATASET_ID", "7y2j-43cv")
 DOMAIN = os.getenv("SOCRATA_DOMAIN", "www.datos.gov.co")
 RESOURCE_URL = f"https://{DOMAIN}/resource/{DATASET_ID}.json"
 METADATA_URL = f"https://{DOMAIN}/api/views/{DATASET_ID}"
+# Socrata no garantiza el orden de las filas sin $order; paginar sin ordenar
+# puede repetir o saltar registros. ":id" es el id interno de fila (único y estable).
+STABLE_ORDER = ":id"
+
+# Errores de red ante los que vale la pena volver a pedir la misma página.
+ERRORES_RED = (
+    requests.exceptions.ChunkedEncodingError,  # conexión cortada a mitad de la respuesta
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+)
 
 
 class SocrataClient:
     """Fetch metadata or bounded data from a Socrata dataset."""
 
-    def __init__(self, timeout: int = 60) -> None:
+    def __init__(self, timeout: int = 120, intentos_pagina: int = 6) -> None:
         self.timeout = timeout
+        self.intentos_pagina = intentos_pagina
         self.session = requests.Session()
         self.session.headers.update({"Accept": "application/json"})
+        reintentos = Retry(total=5,backoff_factor=2,status_forcelist=(429, 500, 502, 503, 504),allowed_methods=("GET",),)
+        self.session.mount("https://", HTTPAdapter(max_retries=reintentos))
+
+    def _get_page(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Pide una página y la reintenta si la conexión se cae, sin perder lo ya descargado."""
+        for intento in range(1, self.intentos_pagina + 1):
+            try:
+                response = self.session.get(RESOURCE_URL, params=params, timeout=self.timeout)
+                response.raise_for_status()
+                return response.json()
+            except ERRORES_RED as error:
+                if intento == self.intentos_pagina:
+                    raise
+                espera = 5 * 2 ** (intento - 1)  # 5, 10, 20, 40, 80 segundos
+                print(
+                    f"  Falla de conexión en offset {params.get('$offset', 0):,} "
+                    f"({type(error).__name__}). Reintento {intento}/{self.intentos_pagina - 1} "
+                    f"en {espera} s..."
+                )
+                time.sleep(espera)
+        return []
 
     def metadata(self) -> dict[str, Any]:
         response = self.session.get(METADATA_URL, timeout=self.timeout)
@@ -60,11 +95,8 @@ class SocrataClient:
             }
             if where:
                 params["$where"] = where
-            if order:
-                params["$order"] = order
-            response = self.session.get(RESOURCE_URL, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            page = response.json()
+            params["$order"] = order or STABLE_ORDER
+            page = self._get_page(params)
             if not page:
                 break
             rows.extend(page)
@@ -92,16 +124,18 @@ class SocrataClient:
                 "$select": select,
                 "$limit": page_size,
                 "$offset": offset,
+                "$order": STABLE_ORDER,
             }
             if where:
                 params["$where"] = where
-            response = self.session.get(RESOURCE_URL, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            page = response.json()
+            page = self._get_page(params)
             if not page:
                 break
             rows.extend(page)
             print(f"Descargadas {len(rows):,}/{total:,} filas")
             if len(page) < page_size:
                 break
+
+        if len(rows) != total:
+            print(f"ADVERTENCIA: se descargaron {len(rows):,} filas y se esperaban {total:,}.")
         return pd.DataFrame(rows)
