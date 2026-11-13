@@ -72,6 +72,26 @@ def clean_transactions(frame: pd.DataFrame) -> pd.DataFrame:
                 data.loc[orden]
                 .duplicated(["matricula", "num_anotacion"], keep="first")
                 .reindex(data.index))
+    if {"documento_justificativo", "orip", "matricula", "fecha_escritura", "valor"}.issubset(data.columns):
+        # Escritura paquete: una misma escritura (oficina + número + fecha) sobre varios folios.
+        # La llave no usa el texto completo porque cambia de formato entre copias.
+        numero = data["documento_justificativo"].str.extract(r"ESCRITURA\s+0*(\d+)")[0]
+        clave = (
+            data["orip"].astype("Int64").astype("string")
+            + "|" + numero
+            + "|" + data["fecha_escritura"].dt.strftime("%Y-%m-%d")
+        )
+        data["clave_escritura"] = clave.astype("string")
+        grupo = data.groupby(clave)
+        folios = grupo["matricula"].transform("nunique")
+        data["folios_en_escritura"] = folios.astype("Int64")
+        data["escritura_paquete"] = folios.gt(1).fillna(False).astype(bool)
+        # Valor repetido: todos los folios del paquete llevan el mismo valor, que entonces
+        # corresponde al total del negocio y no al precio individual de cada folio.
+        valores_distintos = grupo["valor"].transform("nunique")
+        data["valor_repetido_en_paquete"] = (
+            data["escritura_paquete"] & valores_distintos.eq(1)
+        ).fillna(False).astype(bool)
     if "matricula" in data:
         data["matricula_valida"] = data["matricula"].notna() & data["matricula"].ne("")
     if {"valor_valido", "registro_duplicado", "matricula_valida"}.issubset(data.columns):
