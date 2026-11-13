@@ -130,15 +130,39 @@ def clean_transactions(frame: pd.DataFrame) -> pd.DataFrame:
     return data
 
 
+BANDERAS_CALIDAD = (
+    "valor_valido",
+    "valor_simbolico_o_invalido",
+    "valor_simbolico",
+    "registro_duplicado",
+    "anotacion_duplicada",
+    "radicacion_antes_de_escritura",
+    "escritura_rezagada",
+    "escritura_paquete",
+    "valor_repetido_en_paquete",
+    "incluido_universo_modelado",
+)
+
+
 def profile_transactions(frame: pd.DataFrame) -> dict[str, Any]:
-    """Summarize completeness, cardinality and duplicate keys."""
+    """Summarize completeness, cardinality, duplicate keys and quality flags."""
     key = frame["pk"] if "pk" in frame else pd.Series(dtype="string")
+    total = len(frame)
+    banderas = {
+        bandera: {
+            "registros": int(frame[bandera].sum()),
+            "pct": round(float(frame[bandera].mean()) * 100, 2) if total else 0.0,
+        }
+        for bandera in BANDERAS_CALIDAD
+        if bandera in frame
+    }
     return {
-        "rows": int(len(frame)),
+        "rows": int(total),
         "columns": int(len(frame.columns)),
         "missing_by_column": frame.isna().sum().astype(int).to_dict(),
         "duplicate_rows": int(frame.duplicated().sum()),
         "duplicate_pk": int(key.duplicated().sum()),
         "unique_departments": int(frame["departamento"].nunique()) if "departamento" in frame else 0,
         "unique_municipalities": int(frame["municipio"].nunique()) if "municipio" in frame else 0,
+        "banderas_calidad": banderas,
     }
